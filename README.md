@@ -31,3 +31,8 @@ It classifies user-reported symptoms into one of the following categories:
 ## 👩‍💻 Author
 **Akshita Jangid**
 
+## 🚀 Live Demo
+
+🔗 **Try the app here:** 
+https://langgraph-medical-symptom-classifier-d3peuo6bejugksusuo4z5r.streamlit.app/
+ ⚠️ Disclaimer: This app is for educational purposes only and does not provide medical advice.
