@@ -1,53 +1,109 @@
+```python
 import streamlit as st
-from langchain_core.messages import HumanMessage
+from typing import TypedDict, Literal
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 
-# Initialize LLM
-llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+# -------------------------------
+# Streamlit configuration
+# -------------------------------
+st.set_page_config(
+    page_title="AI Medical Symptom Classifier",
+    layout="centered"
+)
 
-# App UI
-st.set_page_config(page_title="AI Medical Symptom Classifier", layout="centered")
 st.title("🏥 AI Medical Symptom Classifier")
 st.write("Enter your symptom and get guidance.")
 
-# State
-class GraphState(dict):
-    pass
+# -------------------------------
+# Initialize LLM
+# -------------------------------
+@st.cache_resource
+def get_llm():
+    return ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 
-# Node: classify symptom
-def classify_symptom(state):
+llm = get_llm()
+
+# -------------------------------
+# Define Graph State
+# -------------------------------
+class GraphState(TypedDict, total=False):
+    symptom: str
+    category: str
+    answer: str
+
+# -------------------------------
+# Node: Classify symptom
+# -------------------------------
+def classify_symptom(state: GraphState) -> dict:
+    symptom = state.get("symptom", "").strip()
+
     prompt = f"""
-    You are a medical assistant.
-    Classify the symptom into:
-    - General
-    - Emergency
-    - Mental Health
+Classify the following symptom into exactly one category:
+General
+Emergency
+Mental Health
 
-    Symptom: {state['symptom']}
-    Respond with only one word.
-    """
-    response = llm.invoke([HumanMessage(content=prompt)])
-    state["category"] = response.content.strip()
-    return state
+Return only the category name.
 
-# Node: general
-def general(state):
-    state["answer"] = "This seems like a general issue. Please consult a general physician."
-    return state
+Symptom: {symptom}
+"""
 
-# Node: emergency
-def emergency(state):
-    state["answer"] = "This is an emergency. Seek immediate medical attention."
-    return state
+    response = llm.invoke([
+        SystemMessage(
+            content="You are a cautious medical symptom classification assistant."
+        ),
+        HumanMessage(content=prompt)
+    ])
 
-# Node: mental_health(state)
-def mental_health(state):
-    state["answer"] = "This may relate to mental health. Consider talking to a mental health professional."
-    return state
+    category = response.content.strip().lower()
 
-# Build graph
+    # Normalize the model's response
+    if "emergency" in category:
+        category = "emergency"
+    elif "mental health" in category or "mental_health" in category:
+        category = "mental health"
+    else:
+        category = "general"
+
+    return {"category": category}
+
+# -------------------------------
+# Nodes: Guidance
+# -------------------------------
+def general(state: GraphState) -> dict:
+    return {
+        "answer": (
+            "This may be a non-emergency issue. Consider consulting "
+            "a qualified healthcare professional for an assessment. "
+            "Seek urgent care if symptoms are severe or worsening."
+        )
+    }
+
+def emergency(state: GraphState) -> dict:
+    return {
+        "answer": (
+            "Your symptoms may require urgent assessment. Contact "
+            "local emergency services or seek emergency medical care "
+            "immediately if you may be experiencing a medical emergency."
+        )
+    }
+
+def mental_health(state: GraphState) -> dict:
+    return {
+        "answer": (
+            "Consider speaking with a qualified mental health professional. "
+            "If you are in immediate danger or may harm yourself, contact "
+            "local emergency services or a crisis support service."
+        )
+    }
+
+# -------------------------------
+# Build LangGraph
+# -------------------------------
 builder = StateGraph(GraphState)
+
 builder.add_node("classify", classify_symptom)
 builder.add_node("general", general)
 builder.add_node("emergency", emergency)
@@ -55,13 +111,25 @@ builder.add_node("mental_health", mental_health)
 
 builder.set_entry_point("classify")
 
+def route_category(state: GraphState) -> Literal[
+    "general", "emergency", "mental_health"
+]:
+    category = state.get("category", "general").lower().strip()
+
+    if category == "emergency":
+        return "emergency"
+    elif category in ("mental health", "mental_health"):
+        return "mental_health"
+    else:
+        return "general"
+
 builder.add_conditional_edges(
     "classify",
-    lambda x: x["category"].lower(),
+    route_category,
     {
         "general": "general",
         "emergency": "emergency",
-        "mental health": "mental_health"
+        "mental_health": "mental_health"
     }
 )
 
@@ -71,13 +139,28 @@ builder.add_edge("mental_health", END)
 
 graph = builder.compile()
 
-# UI interaction
+# -------------------------------
+# Streamlit UI
+# -------------------------------
 symptom = st.text_input("Enter your symptom")
 
 if st.button("Analyze"):
-    if symptom:
-        result = graph.invoke({"symptom": symptom})
-        st.success(f"Category: {result['category']}")
-        st.info(result["answer"])
-    else:
+    if not symptom.strip():
         st.warning("Please enter a symptom.")
+    else:
+        try:
+            with st.spinner("Analyzing your symptom..."):
+                result = graph.invoke({"symptom": symptom.strip()})
+
+            st.success(f"Category: {result.get('category', 'General').title()}")
+            st.info(result.get("answer", "Please consult a healthcare professional."))
+
+            st.caption(
+                "This tool provides general guidance, not a diagnosis. "
+                "It cannot reliably rule out emergencies. Seek urgent care "
+                "for severe or rapidly worsening symptoms."
+            )
+
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
+```
