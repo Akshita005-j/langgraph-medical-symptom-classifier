@@ -1,5 +1,2 @@
 streamlit
 langgraph
-langchain
-langchain-openai
-openai
